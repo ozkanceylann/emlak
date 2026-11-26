@@ -1,6 +1,6 @@
 # Aras Emlak Yönetimi
 
-Portföy ve müşteri takibi için mobil uyumlu web uygulaması. İlk ofis Aras Emlak olarak başlar; yapı birden çok ofisi ve danışman hesaplarını destekleyecek şekilde Supabase üzerinde tenant bazlı tasarlanmıştır.
+Portföy ve müşteri takibi için mobil uyumlu web uygulaması. İlk ofis Aras Emlak olarak başlar. Platform yöneticisi diğer emlak ofislerini oluşturur; ofisler ve danışmanları kendi tenant verileriyle birbirinden ayrılır.
 
 ## Çalıştırma
 
@@ -13,18 +13,19 @@ Portföy ve müşteri takibi için mobil uyumlu web uygulaması. İlk ofis Aras 
 
 ## Veritabanı
 
-`supabase/migrations/202611260001_initial_schema.sql` ilk kurulum şemasıdır. Supabase CLI ile migration uygulamak için:
+`supabase/migrations` dizini, Supabase `grdbtngkuthdckjtxzai` projesinde uygulanan migration'ları içerir. Supabase CLI ile eşitlemek için:
 
 ```sh
 supabase link --project-ref grdbtngkuthdckjtxzai
 supabase db push
 ```
 
-İlk Aras ofis yöneticisi, Auth kaydı açtıktan sonra `supabase.rpc('claim_aras_office')` ile Aras ofisini sahiplenir. Diğer ofisler için `supabase.rpc('create_company', { company_name: 'Ofis adı' })` kullanılır. Danışmanlar `company_members` kaydına sadece ofis yöneticisi tarafından eklenir.
+İlk platform yöneticisi, uygulamada hesap oluştururken tek kullanımlık kurulum kodunu girer ve e-posta adresini doğrular. Bu hesap Aras ofisinin yöneticisi olur. Daha sonra yan menüdeki **Emlak ofisleri** ekranından ofis ve başlangıç yönetici e-postası tanımlanır. Belirlenen ofis yöneticisi, aynı e-posta ile kayıt olup adresini doğrulayınca o ofise bağlanır. `create_company` RPC'si ve veritabanı politikaları ofis açmayı platform yöneticisiyle sınırlar; herkese açık ofis kaydı yoktur.
 
 ## Güvenlik ve veri modeli
 
 - Ofis verilerinde `company_id`, danışman kayıtlarında `created_by` ile ayrıştırılır.
+- `platform_admins` sadece platform yöneticilerini tutar. Her ofis tablosunda RLS aktiftir; farklı ofislerin kayıtları birbirine açılmaz.
 - Her uygulama tablosunda RLS açıktır. Yönetici kendi ofisindeki tüm kayıtları görür; danışman varsayılan olarak kendi kayıtlarını görür. `can_view_all` ofis yöneticisi tarafından açılabilir.
 - İl/ilçe aramaları `provinces` ve `districts` tablolarını kullanır. İlçe referans verisi 973 ilçe içerir.
 - Portföy, müşteri, mal sahibi, randevu, görev, favori, paylaşım, görüntüleme ve görüşme notları tabloları hazırdır.
@@ -35,4 +36,4 @@ supabase db push
 
 Portföy listeleme, Satılık/Kiralık sekmeleri, arama, ilçe/fiyat filtreleri, portföy oluşturma, Supabase Auth, müşteri ve mal sahibi kaydı, randevu ve görev oluşturma/listeleme başlangıç sürümünde çalışır. Genel Bakış ekranındaki portföy, müşteri, randevu ve görüntüleme sayaçları oturum açıldığında veritabanından alınır.
 
-Düzenleme/silme akışları, portföy fotoğrafı ve evrak yükleme, anlık müşteri eşleştirme arayüzü, telefon bildirimi, WhatsApp gönderimi, PDF ilan sunumu, danışman davet/izin ekranı ve ödeme/abonelik tahsilatı henüz bağlı değildir. Paylaşım bağlantısı için public ilan RPC'si ve görüntüleme kaydı hazırdır; gerçek fotoğraflar ve ofis iletişim bilgisi için Storage ve ofis ayarları ekranı ayrıca eklenmelidir.
+Düzenleme/silme akışları, portföy fotoğrafı ve evrak yükleme, anlık müşteri eşleştirme arayüzü, telefon bildirimi, WhatsApp gönderimi, PDF ilan sunumu, danışman davet/izin ekranı ve ödeme/abonelik tahsilatı henüz bağlı değildir. Paylaşım bağlantısı için public ilan RPC'si ve görüntüleme kaydı hazırdır; gerçek fotoğraflar ve ofis iletişim bilgisi için Storage ve ofis ayarları ekranı ayrıca eklenmelidir. Yeni ofis yöneticisine otomatik davet e-postası gönderimi de henüz bağlı değildir.
