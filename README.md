@@ -33,4 +33,6 @@ supabase db push
 
 ## Şimdiki uygulama kapsamı
 
-Portföy listeleme, Satılık/Kiralık sekmeleri, arama, ilçe/fiyat filtreleri, yeni portföy formu ve Supabase Auth oturum açma akışı başlangıç uygulamasındadır. Müşteri, mal sahibi, randevu ve görev ekranlarının veritabanı şeması hazır; listeleme/form akışları sonraki geliştirme adımında tamamlanmalıdır. Dosya yükleme, telefon push bildirimi, WhatsApp gönderimi, PDF sunumu ve ödeme/abonelik tahsilatı henüz bağlı değildir.
+Portföy listeleme, Satılık/Kiralık sekmeleri, arama, ilçe/fiyat filtreleri, portföy oluşturma, Supabase Auth, müşteri ve mal sahibi kaydı, randevu ve görev oluşturma/listeleme başlangıç sürümünde çalışır. Genel Bakış ekranındaki portföy, müşteri, randevu ve görüntüleme sayaçları oturum açıldığında veritabanından alınır.
+
+Düzenleme/silme akışları, portföy fotoğrafı ve evrak yükleme, anlık müşteri eşleştirme arayüzü, telefon bildirimi, WhatsApp gönderimi, PDF ilan sunumu, danışman davet/izin ekranı ve ödeme/abonelik tahsilatı henüz bağlı değildir. Paylaşım bağlantısı için public ilan RPC'si ve görüntüleme kaydı hazırdır; gerçek fotoğraflar ve ofis iletişim bilgisi için Storage ve ofis ayarları ekranı ayrıca eklenmelidir.
