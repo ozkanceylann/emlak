@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Building2, CalendarDays, Eye,
@@ -25,6 +25,7 @@ const kindCodes = { Daire: 'apartment', Villa: 'villa', Arsa: 'land', Tarla: 'fi
 const kindLabels = Object.fromEntries(Object.entries(kindCodes).map(([label, code]) => [code, label]))
 
 function App() {
+  const accessLoadingUser = useRef(null)
   const [page, setPage] = useState('Genel Bakış')
   const [tab, setTab] = useState('Satılık')
   const [query, setQuery] = useState('')
@@ -32,6 +33,7 @@ function App() {
   const [properties, setProperties] = useState(propertiesSeed)
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false)
   const [company, setCompany] = useState('Aras Emlak')
   const [companyId, setCompanyId] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -49,26 +51,28 @@ function App() {
     return () => listener.subscription.unsubscribe()
   }, [])
   useEffect(() => {
-    if (!session?.user || !supabase) return
-    const pendingOffice = localStorage.getItem('aras_pending_office')
-    if (pendingOffice) {
-      const createOffice = pendingOffice.toLocaleLowerCase('tr').includes('aras')
-        ? supabase.rpc('claim_aras_office')
-        : supabase.rpc('create_company', { company_name: pendingOffice })
-      createOffice.then(({error}) => {
-        if (!error) {
-          localStorage.removeItem('aras_pending_office')
-          window.location.reload()
-        }
-      })
-    } else {
-      supabase.from('company_members').select('id').limit(1).then(({data}) => {
-        if (!data?.length) supabase.rpc('claim_aras_office')
-      })
+    if (!session?.user || !supabase) { accessLoadingUser.current = null; return }
+    if (accessLoadingUser.current === session.user.id) return
+    accessLoadingUser.current = session.user.id
+    const loadAccess = async () => {
+      const setupCode = sessionStorage.getItem('emlak_platform_setup_code')
+      if (setupCode) {
+        sessionStorage.removeItem('emlak_platform_setup_code')
+        const {error} = await supabase.rpc('claim_initial_platform_admin',{setup_token:setupCode})
+        if (error) { sessionStorage.setItem('emlak_platform_setup_code',setupCode); notify(error.message); accessLoadingUser.current = null }
+      } else {
+        await supabase.rpc('claim_company_office')
+      }
+      const {data:admin}=await supabase.from('platform_admins').select('user_id').eq('user_id',session.user.id).maybeSingle()
+      setIsPlatformAdmin(Boolean(admin))
+      const {data:members}=await supabase.from('company_members').select('id,company_id,role,companies(name)').limit(1)
+      if(members?.[0]) {
+        setProfile(members[0]);setCompanyId(members[0].company_id);setCompany(members[0].companies?.name||'Aras Emlak')
+      } else {
+        setProfile(null);setCompanyId(null)
+      }
     }
-    supabase.from('company_members').select('id,company_id,role, companies(name)').limit(1).then(({ data }) => {
-      if (data?.[0]) { setProfile(data[0]); setCompanyId(data[0].company_id); setCompany(data[0].companies?.name || 'Aras Emlak') }
-    })
+    loadAccess()
   }, [session])
   useEffect(() => {
     if (!session || !supabase) return
@@ -128,6 +132,12 @@ function App() {
     if(error){notify(error.message);return}
     setModal('');setRefreshKey(k=>k+1);notify('Kayıt eklendi')
   }
+  const createOffice = async form => {
+    if(!supabase||!isPlatformAdmin){notify('Ofis açma yetkisi yalnızca platform yöneticisinde bulunur');return}
+    const {error}=await supabase.rpc('create_company',{company_name:form.name,initial_admin_email:form.admin_email})
+    if(error){notify(error.message);return}
+    setModal('');setRefreshKey(k=>k+1);notify('Emlak ofisi oluşturuldu')
+  }
 
   if (window.location.pathname.startsWith('/ilan/')) {
     return <PublicListing token={window.location.pathname.split('/')[2]}/>
@@ -140,14 +150,14 @@ function App() {
       <div className="side-label">MENÜ</div>
       <nav className="main-nav">{navItems.map(({label, icon: Icon}) => <button key={label} onClick={() => {setPage(label); setMobileMenu(false)}} className={`nav-link ${page===label?'active':''}`}><Icon size={18}/><span>{label}</span>{label==='Randevular' && <i>3</i>}</button>)}</nav>
       <div className="side-label side-label-spaced">YÖNETİM</div>
-      <nav className="main-nav"><button className={`nav-link ${page==='Danışmanlar'?'active':''}`} onClick={()=>setPage('Danışmanlar')}><Users size={18}/><span>Danışmanlar</span></button><button className={`nav-link ${page==='Raporlar'?'active':''}`} onClick={()=>setPage('Raporlar')}><ListFilter size={18}/><span>Raporlar</span></button><button className={`nav-link ${page==='Ayarlar'?'active':''}`} onClick={()=>setPage('Ayarlar')}><Settings size={18}/><span>Ayarlar</span></button></nav>
+      <nav className="main-nav">{isPlatformAdmin&&<button className={`nav-link ${page==='Ofisler'?'active':''}`} onClick={()=>setPage('Ofisler')}><Building2 size={18}/><span>Emlak ofisleri</span></button>}<button className={`nav-link ${page==='Danışmanlar'?'active':''}`} onClick={()=>setPage('Danışmanlar')}><Users size={18}/><span>Danışmanlar</span></button><button className={`nav-link ${page==='Raporlar'?'active':''}`} onClick={()=>setPage('Raporlar')}><ListFilter size={18}/><span>Raporlar</span></button><button className={`nav-link ${page==='Ayarlar'?'active':''}`} onClick={()=>setPage('Ayarlar')}><Settings size={18}/><span>Ayarlar</span></button></nav>
       <div className="sidebar-bottom"><div className="storage-card"><div className="storage-icon"><Cloud size={16}/></div><div><strong>Güvende ve güncel</strong><span>Verileriniz bulutta saklanıyor</span></div><Check size={15} className="storage-check"/></div><button className="help-link"><CircleHelp size={17}/> Yardım ve destek</button><button className="user-profile" onClick={session?signOut:()=>setModal('login')}><div className="user-avatar">Ö</div><span><b>{session?.user?.email?.split('@')[0] || 'Özkan Ceylan'}</b><small>{session ? 'Hesabım · Çıkış' : 'Ön izleme modu'}</small></span><MoreHorizontal size={18}/></button></div>
     </aside>
     {mobileMenu && <div className="scrim" onClick={()=>setMobileMenu(false)} />}
     <main className="main-area">
       <header className="topbar"><div className="top-left"><button className="menu-toggle" onClick={()=>setMobileMenu(true)}><Menu size={20}/></button><div className="crumb">Aras Emlak <ChevronRight size={14}/> <span>{page}</span></div></div><div className="top-actions"><div className="sync-chip"><span/> Son senkronizasyon şimdi</div><button className="icon-button" title="Bildirimler" onClick={()=>notify('Yeni bildiriminiz yok')}><Bell size={18}/><i/></button><div className="top-divider"/><button className="top-user" onClick={session?signOut:()=>setModal('login')}><div className="user-avatar small">Ö</div><span>Özkan Ceylan</span><ChevronDown size={15}/></button></div></header>
       <div className="content-wrap">
-        {page==='Genel Bakış' ? <Dashboard properties={properties} stats={liveStats} setPage={setPage} openModal={setModal} /> : page==='Portföyler' ? <>
+        {page==='Ofisler'&&isPlatformAdmin ? <AdminOfficesPage refreshKey={refreshKey} openModal={setModal}/> : page==='Genel Bakış' ? <Dashboard properties={properties} stats={liveStats} setPage={setPage} openModal={setModal} /> : page==='Portföyler' ? <>
           <section className="page-heading"><div><div className="eyebrow">PORTFÖY YÖNETİMİ</div><h1>Portföyleriniz</h1><p>Tüm gayrimenkul ilanlarınızı tek yerden yönetin.</p></div><button className="primary-button" onClick={()=>setModal('listing')}><Plus size={18}/> Yeni portföy ekle</button></section>
           <div className="listing-tabs"><button onClick={()=>setTab('Satılık')} className={tab==='Satılık'?'selected':''}><span className="tab-dot sale"/>Satılık <b>{properties.filter(p=>p.type==='Satılık').length}</b></button><button onClick={()=>setTab('Kiralık')} className={tab==='Kiralık'?'selected':''}><span className="tab-dot rent"/>Kiralık <b>{properties.filter(p=>p.type==='Kiralık').length}</b></button><div className="tabs-spacer"/><span className="view-total">Toplam {properties.length} portföy</span></div>
           <div className="filter-bar"><div className="search-box"><Search size={17}/><input placeholder="Portföy, mahalle veya ilçe ara..." value={query} onChange={e=>setQuery(e.target.value)}/><kbd>⌘ K</kbd></div><button className={`filter-button ${filtersOpen?'toggled':''}`} onClick={()=>setFiltersOpen(!filtersOpen)}><SlidersHorizontal size={16}/> Filtrele <span className="filter-count">{selectedDistrict!=='Tüm ilçeler'||maxPrice?1:0}</span></button><button className="sort-button" onClick={()=>notify('Portföyler en yeni eklenene göre sıralandı')}><ArrowDown size={15}/> En yeni <ChevronDown size={14}/></button><button className="view-button" onClick={()=>notify('Liste görünümü hazır')}><MoreHorizontal size={18}/></button></div>
@@ -160,7 +170,8 @@ function App() {
       <footer className="footer"><span>© 2026 Aras Emlak Yönetim Sistemi</span><span>Verileriniz güvenle saklanır <span className="footer-dot">·</span> Yardım</span></footer>
     </main>
     {modal==='listing' && <ListingModal onClose={()=>setModal('')} onSave={addListing}/>}
-    {modal==='login' && <LoginModal onClose={()=>setModal('')} onLogin={async(email,password,mode,officeName)=>{if(!supabase){notify('Supabase bağlantısı için .env.local dosyasını doldurun');return}if(mode==='signup')localStorage.setItem('aras_pending_office',officeName);const result=mode==='signup'?await supabase.auth.signUp({email,password}):await supabase.auth.signInWithPassword({email,password});if(result.error){localStorage.removeItem('aras_pending_office');notify(result.error.message)}else if(mode==='signup'&&!result.data.session){setModal('');notify('E-posta doğrulaması için gelen kutunuzu kontrol edin')}else setModal('')}} />}
+    {modal==='login' && <LoginModal onClose={()=>setModal('')} onLogin={async(email,password,mode,setupCode)=>{if(!supabase){notify('Supabase bağlantısı için .env.local dosyasını doldurun');return}if(mode==='signup'&&setupCode)sessionStorage.setItem('emlak_platform_setup_code',setupCode);const result=mode==='signup'?await supabase.auth.signUp({email,password}):await supabase.auth.signInWithPassword({email,password});if(result.error){sessionStorage.removeItem('emlak_platform_setup_code');notify(result.error.message)}else if(mode==='signup'&&!result.data.session){setModal('');notify('E-posta adresinizi doğrulayın; ardından giriş yapınca hesap kurulumu tamamlanır.')}else setModal('')}} />}
+    {modal==='office' && <OfficeModal onClose={()=>setModal('')} onSave={createOffice}/>}
     {['client','owner','appointment','task'].includes(modal) && <RecordModal kind={modal} onClose={()=>setModal('')} onSave={form=>saveRecord(modal,form)}/>}
     {modal.startsWith('property:') && <PropertyModal property={properties.find(p=>p.id===modal.split(':')[1])} onClose={()=>setModal('')} onShare={()=>shareListing(modal.split(':')[1])}/>}
     {toast && <div className="toast"><Check size={16}/>{toast}</div>}
@@ -224,7 +235,13 @@ function RecordModal({kind,onClose,onSave}) {
  {kind==='client'&&<label className="span-two">Özel not<textarea rows="3" value={form.notes} onChange={e=>update('notes',e.target.value)} placeholder="Müşteri tercihleri ve özel notlar"/></label>}
  </div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Vazgeç</button><button className="primary-button" disabled={!required} onClick={()=>onSave(form)}><Check size={16}/> Kaydet</button></div></ModalShell>
 }
-function LoginModal({onClose,onLogin}) {const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[office,setOffice]=useState('Aras Emlak'),[mode,setMode]=useState('login');return <ModalShell title={mode==='login'?'Hesabınıza giriş yapın':'Ofis hesabı oluşturun'} subtitle="Portföy ve müşteri bilgilerinizi güvenle yönetin." onClose={onClose}><div className="form-grid">{mode==='signup'&&<label className="span-two">Ofis adı<input placeholder="Aras Emlak" value={office} onChange={e=>setOffice(e.target.value)}/></label>}<label className="span-two">E-posta<input type="email" placeholder="ad@ofis.com" value={email} onChange={e=>setEmail(e.target.value)}/></label><label className="span-two">Şifre<input type="password" placeholder="En az 8 karakter" value={password} onChange={e=>setPassword(e.target.value)}/></label></div><div className="modal-actions"><button className="secondary-button" onClick={()=>setMode(mode==='login'?'signup':'login')}>{mode==='login'?'Yeni ofis oluştur':'Giriş ekranı'}</button><button className="primary-button" onClick={()=>onLogin(email,password,mode,office)}>{mode==='login'?'Giriş yap':'Hesabı oluştur'}</button></div><p className="form-footnote">Aras ofisinin ilk hesabı yönetici olur. Sonraki danışmanlar yönetici davetiyle eklenir.</p></ModalShell>}
+function AdminOfficesPage({refreshKey,openModal}) {
+ const [offices,setOffices]=useState([]),[loading,setLoading]=useState(true)
+ useEffect(()=>{if(!supabase)return;setLoading(true);supabase.from('companies').select('id,name,admin_email,subscription_status,subscription_plan,created_at').order('created_at',{ascending:false}).then(({data})=>{setOffices(data||[]);setLoading(false)})},[refreshKey])
+ return <><section className="page-heading"><div><div className="eyebrow">PLATFORM YÖNETİMİ</div><h1>Emlak ofisleri</h1><p>Sisteme katılan ofisleri yalnızca platform yöneticisi oluşturabilir.</p></div><button className="primary-button" onClick={()=>openModal('office')}><Plus size={18}/> Ofis aç</button></section><div className="record-list">{loading?<div className="record-empty">Ofisler yükleniyor…</div>:offices.map(office=><div className="record-row" key={office.id}><div className="record-mark"><Building2 size={17}/></div><div className="record-info"><strong>{office.name}</strong><span>{office.admin_email||'İlk yönetici Aras platform hesabı'} · {office.subscription_plan} · {office.subscription_status}</span></div><span className="office-created">{new Date(office.created_at).toLocaleDateString('tr-TR')}</span></div>)}{!loading&&!offices.length&&<div className="record-empty">Henüz ofis yok.</div>}</div><p className="admin-hint">Ofis oluştururken bir başlangıç yöneticisi e-postası girin. Bu kişi hesap açıp e-postasını doğrulayarak giriş yaptığında ofis yöneticisi olur.</p></>
+}
+function LoginModal({onClose,onLogin}) {const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[setupCode,setSetupCode]=useState(''),[mode,setMode]=useState('login');return <ModalShell title={mode==='login'?'Hesabınıza giriş yapın':'Hesap oluşturun'} subtitle="Ofislerin açılması platform yöneticisinin yetkisindedir." onClose={onClose}><div className="form-grid">{mode==='signup'&&<label className="span-two">İlk platform yöneticisi kurulum kodu <input type="password" autoComplete="off" placeholder="İlk yöneticiyseniz kodu girin" value={setupCode} onChange={e=>setSetupCode(e.target.value)}/></label>}<label className="span-two">E-posta<input type="email" placeholder="ad@ofis.com" value={email} onChange={e=>setEmail(e.target.value)}/></label><label className="span-two">Şifre<input type="password" placeholder="En az 8 karakter" value={password} onChange={e=>setPassword(e.target.value)}/></label></div><div className="modal-actions"><button className="secondary-button" onClick={()=>setMode(mode==='login'?'signup':'login')}>{mode==='login'?'Hesap oluştur':'Giriş ekranı'}</button><button className="primary-button" onClick={()=>onLogin(email,password,mode,setupCode)}>{mode==='login'?'Giriş yap':'Hesabı oluştur'}</button></div><p className="form-footnote">Yeni hesaplar ofis oluşturamaz. Ofis yöneticileri platform yöneticisinin belirlediği e-posta adresiyle hesap açar.</p></ModalShell>}
+function OfficeModal({onClose,onSave}) {const [name,setName]=useState(''),[adminEmail,setAdminEmail]=useState('');return <ModalShell title="Yeni emlak ofisi aç" subtitle="Ofis hesabını ve başlangıç yöneticisini tanımlayın." onClose={onClose}><div className="form-grid"><label className="span-two">Ofis adı<input value={name} onChange={e=>setName(e.target.value)} placeholder="Örn. Aras Emlak"/></label><label className="span-two">Ofis yöneticisi e-posta adresi<input type="email" value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} placeholder="yonetici@ofis.com"/></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Vazgeç</button><button className="primary-button" disabled={!name||!adminEmail} onClick={()=>onSave({name,admin_email:adminEmail})}><Check size={16}/> Ofisi oluştur</button></div></ModalShell>}
 function PropertyModal({property:p,onClose,onShare}) {if(!p)return null;return <ModalShell title={p.title} subtitle={`${p.district} · ${p.neighborhood||'İzmir'}`} onClose={onClose}><div className="detail-image" style={{backgroundImage:`url(${p.image})`}}/><div className="detail-price">{money(p.price)} <span>{p.type==='Kiralık'?'/ ay':'· Satılık'}</span></div><div className="detail-metrics"><span><BedDouble/>{p.rooms}</span><span><Ruler/>{p.area} m²</span><span><Building2/>{p.kind}</span></div><p className="detail-description">{p.description||'İlan açıklaması henüz eklenmedi. Detaylı bilgi için portföy kaydını düzenleyin.'}</p><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Kapat</button><button className="primary-button" onClick={onShare}><ArrowUpRight size={16}/> Paylaşım linkini kopyala</button></div></ModalShell>}
 function ModalShell({title,subtitle,onClose,children}) {return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><div className="modal"><div className="modal-head"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose}><X size={18}/></button></div>{children}</div></div>}
 
