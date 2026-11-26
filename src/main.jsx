@@ -96,13 +96,18 @@ function App() {
   const filtered = useMemo(() => properties.filter(p => p.type === tab && `${p.title} ${p.district} ${p.neighborhood} ${p.kind}`.toLocaleLowerCase('tr').includes(query.toLocaleLowerCase('tr')) && (selectedDistrict === 'Tüm ilçeler' || p.district === selectedDistrict) && (!maxPrice || p.price <= Number(maxPrice))), [properties, tab, query, selectedDistrict, maxPrice])
   const notify = text => { setToast(text); setTimeout(() => setToast(''), 2600) }
   const addListing = async form => {
-    if (supabase && session?.user) {
-      const { data: memberships } = await supabase.from('company_members').select('company_id').limit(1)
-      const { data: props, error } = await supabase.from('properties').insert({ company_id: memberships?.[0]?.company_id, created_by: session.user.id, listing_type: form.type === 'Satılık' ? 'sale' : 'rent', property_type: kindCodes[form.kind], title: form.title, province_id: Number(form.province_id), district_id: form.district_id ? Number(form.district_id) : null, district: form.district, neighborhood: form.neighborhood, room_count: form.rooms, area_sqm: Number(form.area), price: Number(form.price), description: form.description, status: 'active' }).select().single()
-      if (error) { notify(error.message); return }
-      setProperties(curr => [{...props, id: props.id, type: form.type, kind: form.kind, rooms: form.rooms, area: Number(form.area), image: propertiesSeed[0].image, views: 0}, ...curr])
-    } else setProperties(curr => [{ id: crypto.randomUUID(), ...form, area: Number(form.area), price: Number(form.price), image: propertiesSeed[0].image, views: 0 }, ...curr])
-    setModal(''); notify('Portföy kaydedildi')
+    if (!supabase) { notify('Veritabanı bağlantısı kurulamadı; kayıt yapılamadı.'); return }
+    if (!session?.user) { notify('Ön izleme modundasınız. Kalıcı kayıt için giriş yapın.'); setModal('login'); return }
+    if (String(form.province_id)==='45' && (!form.district_id||!form.neighborhood)) { notify('Manisa için ilçe ve mahalle seçin.'); return }
+    const { data: membership, error: membershipError } = await supabase.from('company_members').select('company_id').limit(1).maybeSingle()
+    if (membershipError) { notify('Ofis bağlantısı kontrol edilemedi: '+membershipError.message); return }
+    if (!membership?.company_id) { notify('Hesabınız bir emlak ofisine bağlı değil. Ofis yöneticinizle iletişime geçin.'); return }
+    const area = form.area === '' ? null : Number(form.area)
+    const { data: props, error } = await supabase.from('properties').insert({ company_id: membership.company_id, created_by: session.user.id, listing_type: form.type === 'Satılık' ? 'sale' : 'rent', property_type: kindCodes[form.kind], title: form.title, province_id: Number(form.province_id), district_id: form.district_id ? Number(form.district_id) : null, district: form.district, neighborhood: form.neighborhood, room_count: form.rooms, area_sqm: area, price: Number(form.price), description: form.description, status: 'active' }).select().single()
+    if (error) { notify('Portföy kaydedilemedi: '+error.message); return }
+    setProperties(curr => [{...props, id: props.id, type: form.type, kind: form.kind, rooms: form.rooms, area, image: propertiesSeed[0].image, views: 0}, ...curr])
+    setModal('')
+    notify('Portföy kaydedildi')
   }
   const signOut = async () => { await supabase?.auth.signOut(); setSession(null); notify('Oturum kapatıldı') }
   const shareListing = async propertyId => {
@@ -169,7 +174,7 @@ function App() {
       </div>
       <footer className="footer"><span>© 2026 Aras Emlak Yönetim Sistemi</span><span>Verileriniz güvenle saklanır <span className="footer-dot">·</span> Yardım</span></footer>
     </main>
-    {modal==='listing' && <ListingModal onClose={()=>setModal('')} onSave={addListing}/>}
+    {modal==='listing' && <ListingModal onClose={()=>setModal('')} onSave={addListing} notify={notify}/> }
     {modal==='login' && <LoginModal onClose={()=>setModal('')} onLogin={async(email,password,mode,setupCode)=>{if(!supabase){notify('Supabase bağlantısı için .env.local dosyasını doldurun');return}if(mode==='signup'&&setupCode)sessionStorage.setItem('emlak_platform_setup_code',setupCode);const result=mode==='signup'?await supabase.auth.signUp({email,password}):await supabase.auth.signInWithPassword({email,password});if(result.error){sessionStorage.removeItem('emlak_platform_setup_code');notify(result.error.message)}else if(mode==='signup'&&!result.data.session){setModal('');notify('E-posta adresinizi doğrulayın; ardından giriş yapınca hesap kurulumu tamamlanır.')}else setModal('')}} />}
     {modal==='office' && <OfficeModal onClose={()=>setModal('')} onSave={createOffice}/>}
     {['client','owner','appointment','task'].includes(modal) && <RecordModal kind={modal} onClose={()=>setModal('')} onSave={form=>saveRecord(modal,form)}/>}
@@ -219,24 +224,37 @@ function GenericPage({page,openModal,notify,refreshKey}) {
  return <><section className="page-heading"><div><div className="eyebrow">ARAS EMLAK</div><h1>{titleMap[page]||page}</h1><p>{descMap[page]}</p></div>{tableMap[page]&&<button className="primary-button" onClick={()=>openModal(kind)}><Plus size={18}/>{addLabel}</button>}</section>
  {tableMap[page]?<><div className="generic-toolbar"><div className="search-box"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={page+' içinde ara...'}/></div><span className="view-total">{visible.length} kayıt</span></div><div className="record-list">{loading?<div className="record-empty">Kayıtlar yükleniyor…</div>:visible.length?visible.map(row=><div className="record-row" key={row.id}><div className="record-mark">{page==='Müşteriler'?<Users size={17}/>:page==='Mal Sahipleri'?<Home size={17}/>:page==='Randevular'?<CalendarDays size={17}/>:<ClipboardList size={17}/>}</div><div className="record-info">{details(row)}</div>{row.phone&&<a className="record-call" href={'tel:'+row.phone}>Ara</a>}</div>):<div className="record-empty"><div className="empty-illustration"><Building2 size={24}/></div><b>{rows.length?'Sonuç bulunamadı':page+' kaydı yok'}</b><span>{rows.length?'Arama metnini değiştirebilirsiniz.':'Yeni bir kayıt ekleyerek başlayın.'}</span>{!rows.length&&<button className="secondary-button" onClick={()=>openModal(kind)}><Plus size={15}/> İlk kaydı ekle</button>}</div>}</div></>:<div className="panel empty-table"><div className="empty-illustration"><Building2 size={24}/></div><h2>{titleMap[page]} ekranı hazırlanıyor</h2><p>{descMap[page]}</p></div>}</>
 }
-function ListingModal({onClose,onSave}) {
-  const [form,setForm]=useState({type:'Satılık',kind:'Daire',title:'',province_id:'35',district_id:'',district:'',neighborhood:'',rooms:'3+1',area:'',price:'',description:''})
+function ListingModal({onClose,onSave,notify}) {
+  const [form,setForm]=useState({type:'Satılık',kind:'Daire',title:'',province_id:'45',district_id:'',district:'',neighborhood:'',rooms:'3+1',area:'',price:'',description:''})
   const [provinces,setProvinces]=useState([])
   const [districts,setDistricts]=useState([])
+  const [districtLoading,setDistrictLoading]=useState(false)
   const [neighborhoods,setNeighborhoods]=useState([])
   const [neighborhoodLoading,setNeighborhoodLoading]=useState(false)
   const update=(key,value)=>setForm(current=>({...current,[key]:value}))
 
   useEffect(()=>{
-    if(!supabase)return
-    supabase.from('provinces').select('id,name').order('name').then(({data})=>setProvinces(data||[]))
+    if(!supabase){notify('İl ve ilçe listesi için veritabanı bağlantısı gerekli.');return}
+    let active=true
+    supabase.from('provinces').select('id,name').order('name').then(({data,error})=>{
+      if(!active)return
+      if(error)notify('İl listesi alınamadı: '+error.message)
+      setProvinces(data||[])
+    })
+    return()=>{active=false}
   },[])
 
   useEffect(()=>{
-    if(!supabase||!form.province_id){setDistricts([]);return}
+    if(!supabase||!form.province_id){setDistricts([]);setDistrictLoading(false);return}
     let active=true
+    setDistrictLoading(true)
     supabase.from('districts').select('id,name').eq('province_id',Number(form.province_id)).order('name')
-      .then(({data})=>{if(active)setDistricts(data||[])})
+      .then(({data,error})=>{
+        if(!active)return
+        if(error)notify('İlçe listesi alınamadı: '+error.message)
+        setDistricts(data||[])
+        setDistrictLoading(false)
+      })
     return()=>{active=false}
   },[form.province_id])
 
@@ -265,15 +283,15 @@ function ListingModal({onClose,onSave}) {
       <label>Gayrimenkul türü<select value={form.kind} onChange={e=>update('kind',e.target.value)}>{['Daire','Villa','Arsa','Tarla','İş yeri','Müstakil ev','Diğer'].map(x=><option key={x}>{x}</option>)}</select></label>
       <label>İlan başlığı<input required placeholder="Örn. Deniz manzaralı 3+1" value={form.title} onChange={e=>update('title',e.target.value)}/></label>
       <label>İl<select value={form.province_id} onChange={e=>{update('province_id',e.target.value);update('district_id','');update('district','');update('neighborhood','')}}>{provinces.length?provinces.map(p=><option key={p.id} value={p.id}>{p.name}</option>):<option value="35">İzmir</option>}</select></label>
-      <label>İlçe<select value={form.district_id} onChange={e=>{const d=districts.find(item=>String(item.id)===e.target.value);update('district_id',e.target.value);update('district',d?.name||'');update('neighborhood','')}}><option value="">İlçe seçin</option>{districts.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
-      <label>Mahalle{isManisa?<select value={form.neighborhood} disabled={!form.district_id||neighborhoodLoading} onChange={e=>update('neighborhood',e.target.value)}><option value="">{neighborhoodLoading?'Mahalleler yükleniyor…':form.district_id?'Mahalle seçin':'Önce ilçe seçin'}</option>{neighborhoods.map(n=><option key={n.id} value={n.name}>{n.name}</option>)}</select>:<input placeholder="Mahalle" value={form.neighborhood} onChange={e=>update('neighborhood',e.target.value)}/>}</label>
+      <label>İlçe<select value={form.district_id} disabled={!form.province_id||districtLoading} onChange={e=>{const d=districts.find(item=>String(item.id)===e.target.value);update('district_id',e.target.value);update('district',d?.name||'');update('neighborhood','')}}><option value="">{districtLoading?'İlçeler yükleniyor…':'İlçe seçin'}</option>{districts.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+      <label>Mahalle{isManisa?<select value={form.neighborhood} disabled={!form.district_id||neighborhoodLoading} onChange={e=>update('neighborhood',e.target.value)}><option value="">{neighborhoodLoading?'Mahalleler yükleniyor…':form.district_id?(neighborhoods.length?'Mahalle seçin':'Bu ilçede mahalle bulunamadı'):'Önce ilçe seçin'}</option>{neighborhoods.map(n=><option key={n.id} value={n.name}>{n.name}</option>)}</select>:<input placeholder="Mahalle" value={form.neighborhood} onChange={e=>update('neighborhood',e.target.value)}/>}</label>
       <label>Oda sayısı<select value={form.rooms} onChange={e=>update('rooms',e.target.value)}>{['Stüdyo','1+1','2+1','3+1','4+1','5+1','—'].map(x=><option key={x}>{x}</option>)}</select></label>
       <label>Metrekare<input type="number" placeholder="m²" value={form.area} onChange={e=>update('area',e.target.value)}/></label>
       <label>Fiyat (₺)<input type="number" placeholder="TL" value={form.price} onChange={e=>update('price',e.target.value)}/></label>
       <label className="span-two">Açıklama<textarea rows="3" placeholder="Gayrimenkulün öne çıkan özelliklerini yazın..." value={form.description} onChange={e=>update('description',e.target.value)}/></label>
       <div className="span-two photo-upload"><Plus size={18}/><div><b>Fotoğraf ekleyin</b><span>Fotoğraflarınızı portföyü kaydettikten sonra yükleyebilirsiniz.</span></div></div>
     </div>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose}>Vazgeç</button><button className="primary-button" disabled={!form.title||!form.price} onClick={()=>onSave(form)}><Check size={16}/> Portföyü kaydet</button></div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose}>Vazgeç</button><button className="primary-button" disabled={!form.title||!form.price||(isManisa&&(!form.district_id||!form.neighborhood))} onClick={()=>onSave(form)}><Check size={16}/> Portföyü kaydet</button></div>
   </ModalShell>
 }
 function RecordModal({kind,onClose,onSave}) {
